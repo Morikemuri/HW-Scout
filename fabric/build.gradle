@@ -1,0 +1,34 @@
+plugins {
+    id 'fabric-loom' version '1.0-SNAPSHOT'
+    id 'java'
+}
+
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
+
+archivesBaseName = 'minewatch'
+version = '1.0.0'
+group = 'ru.minewatch'
+
+repositories {
+    maven { url = 'https://maven.fabricmc.net/' }
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.16.5'
+    mappings 'net.fabricmc:yarn:1.16.5+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.13.3'
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 8
+}
