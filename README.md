@@ -5,15 +5,15 @@ Tracks mine reset timers across multiple servers and displays them in a HUD over
 
 ## Features
 
-- **Multi-server HUD** — shows mine timers for all servers you've visited, sorted by time
-- **Nether + End merged** — Ад and Энд shafts are displayed as one combined timer
-- **Live sync** — reads mine data from chat via Telegram userbot ([@liteeventbot](https://t.me/liteeventbot)) and updates in real time
-- **Gist transport** — userbot writes snapshots to a GitHub Gist; mod reads it every minute (no local server needed)
-- **Auto-trigger** — when a timer hits 0, the mod pings the Railway-hosted userbot to fetch a fresh snapshot
-- **Delete mode** — per-row ✕ buttons to remove individual server entries
-- **Filter modes** — show all / epic+ / legendary only / epic only
-- **Legend alerts** — on-screen flash when a legendary mine on another server is about to reset
-- **Draggable HUD** — hold and drag to reposition
+- **Multi-server HUD** - shows mine timers for all servers you've visited, sorted by time
+- **Nether + End merged** - Ад and Энд shafts are displayed as one combined timer
+- **Live sync** - reads mine data from chat via Telegram userbot ([@liteeventbot](https://t.me/liteeventbot)) and updates in real time
+- **Gist transport** - userbot writes snapshots to a GitHub Gist; mod reads it every minute (no local server needed)
+- **Auto-trigger** - when a timer hits 0, the mod pings the Railway-hosted userbot to fetch a fresh snapshot
+- **Delete mode** - per-row ✕ buttons to remove individual server entries
+- **Filter modes** - show all / epic+ / legendary only / epic only
+- **Legend alerts** - on-screen flash when a legendary mine on another server is about to reset
+- **Draggable HUD** - hold and drag to reposition
 
 ## Installation
 
