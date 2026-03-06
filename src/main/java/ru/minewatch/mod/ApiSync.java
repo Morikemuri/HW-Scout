@@ -1,0 +1,207 @@
+package ru.minewatch.mod;
+
+import java.io.*;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.concurrent.*;
+
+public class ApiSync {
+
+    // XOR-encoded to avoid plaintext in bytecode (key ^ 0x5A)
+    private static final byte[] K = {41,56,5,42,47,56,54,51,41,50,59,56,54,63,5,106,47,111,105,109,55,19,55,32,15,56,40,47,19,50,110,119,11,44,40,8,27,5,35,49,30,31,13,56,8,32};
+    private static String dk() { byte[] b=K.clone(); for(int i=0;i<b.length;i++) b[i]^=0x5A; return new String(b,java.nio.charset.StandardCharsets.UTF_8); }
+
+    private static final String BASE    = "https://csmdyxvduilvjxvcyzwj.supabase.co/rest/v1";
+    static final         String VERSION = "1.0.0";
+
+    static  String uuid;
+    private static ScheduledExecutorService exec;
+    private static long lastPing = 0;
+
+    public static void start() {
+        uuid = loadUuid();
+        exec = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "mw-sync");
+            t.setDaemon(true);
+            return t;
+        });
+        exec.scheduleAtFixedRate(ApiSync::tick, 1, 3, TimeUnit.SECONDS);
+    }
+
+    public static void stop() {
+        if (exec != null) exec.shutdownNow();
+    }
+
+    /** Немедленный pull данных из облака (при заходе на сервер). */
+    public static void pullNow() {
+        if (exec != null && !exec.isShutdown()) {
+            exec.submit(() -> { try { pull(); } catch (Exception ignored) {} });
+        }
+    }
+
+    private static void tick() {
+        try { push(); } catch (Exception ignored) {}
+        try { pull(); } catch (Exception ignored) {}
+        if (System.currentTimeMillis() - lastPing > 60_000) {
+            try { ping(); lastPing = System.currentTimeMillis(); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void push() throws Exception {
+        String mode = MineData.getAnarchyMode();
+        if (mode == null || mode.isEmpty()) return;
+        MineData.MineEntry e = MineData.getEntry(mode);
+        if (e == null) return;
+        for (MineData.ShaftEntry s : e.shafts.values()) {
+            if (!s.hasTime()) continue;
+            String body = "{\"server\":"        + q(mode)            +
+                          ",\"world\":"          + q(s.world)          +
+                          ",\"current_type\":"   + q(s.currentType)    +
+                          ",\"next_type\":"      + q(s.nextType)       +
+                          ",\"secs_left\":"      + Math.max(0, s.getRealSecs()) +
+                          ",\"reporter_uuid\":"  + q(uuid)             + "}";
+            post("/mines", body, "resolution=merge-duplicates");
+        }
+    }
+
+    private static void pull() throws Exception {
+        String cutoff = iso(System.currentTimeMillis() - 120_000);
+        String resp   = get("/mines?select=*&updated_at=gte." + URLEncoder.encode(cutoff, "UTF-8"));
+        if (resp == null || resp.length() < 5) return;
+
+        String myMode = MineData.getAnarchyMode();
+        for (String obj : parseArray(resp)) {
+            String server = str(obj, "server");
+            String world  = str(obj, "world");
+            String cur    = str(obj, "current_type");
+            String nxt    = str(obj, "next_type");
+            int    secs   = num(obj, "secs_left");
+            String updAt  = str(obj, "updated_at");
+
+            if (server.isEmpty() || server.equals(myMode)) continue;
+
+            long updMs  = parseIso(updAt);
+            int  actual = secs < 0 ? -1 : (int) Math.max(0, secs - (System.currentTimeMillis() - updMs) / 1000L);
+            MineData.setRemoteData(server, world, cur, nxt, actual);
+        }
+    }
+
+    private static void ping() throws Exception {
+        String body = "{\"uuid\":" + q(uuid) + ",\"mod_version\":" + q(VERSION) + "}";
+        post("/pings", body, "resolution=merge-duplicates");
+    }
+
+    // --- http ---
+
+    private static void post(String path, String body, String prefer) throws Exception {
+        HttpURLConnection c = conn("POST", BASE + path);
+        if (prefer != null) c.setRequestProperty("Prefer", prefer);
+        c.setDoOutput(true);
+        byte[] b = body.getBytes(StandardCharsets.UTF_8);
+        c.setRequestProperty("Content-Length", String.valueOf(b.length));
+        c.getOutputStream().write(b);
+        c.getResponseCode();
+        c.disconnect();
+    }
+
+    private static String get(String path) throws Exception {
+        HttpURLConnection c = conn("GET", BASE + path);
+        int code = c.getResponseCode();
+        if (code != 200) { c.disconnect(); return null; }
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] tmp = new byte[4096]; int n;
+        InputStream is = c.getInputStream();
+        while ((n = is.read(tmp)) != -1) buf.write(tmp, 0, n);
+        c.disconnect();
+        return buf.toString("UTF-8");
+    }
+
+    private static HttpURLConnection conn(String method, String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setRequestMethod(method);
+        c.setConnectTimeout(3000);
+        c.setReadTimeout(3000);
+        c.setRequestProperty("apikey",        dk());
+        c.setRequestProperty("Authorization", "Bearer " + dk());
+        c.setRequestProperty("Content-Type",  "application/json");
+        c.setRequestProperty("Accept",        "application/json");
+        return c;
+    }
+
+    // --- uuid ---
+
+    private static String loadUuid() {
+        File f = new File("C:\\mine_alert\\mwid.txt");
+        try {
+            f.getParentFile().mkdirs();
+            if (f.exists()) {
+                String s = new String(Files.readAllBytes(f.toPath())).trim();
+                if (!s.isEmpty()) return s;
+            }
+            String id = UUID.randomUUID().toString();
+            Files.write(f.toPath(), id.getBytes(StandardCharsets.UTF_8));
+            return id;
+        } catch (Exception e) {
+            return UUID.randomUUID().toString();
+        }
+    }
+
+    // --- json ---
+
+    private static List<String> parseArray(String arr) {
+        List<String> res = new ArrayList<>();
+        int depth = 0, start = -1;
+        for (int i = 0; i < arr.length(); i++) {
+            char ch = arr.charAt(i);
+            if      (ch == '{') { if (depth++ == 0) start = i; }
+            else if (ch == '}') { if (--depth == 0 && start >= 0) { res.add(arr.substring(start, i + 1)); start = -1; } }
+        }
+        return res;
+    }
+
+    private static String str(String o, String k) {
+        String key = "\"" + k + "\":\"";
+        int i = o.indexOf(key);
+        if (i < 0) return "";
+        i += key.length();
+        int j = i;
+        while (j < o.length()) {
+            if (o.charAt(j) == '"' && (j == 0 || o.charAt(j - 1) != '\\')) break;
+            j++;
+        }
+        return o.substring(i, j);
+    }
+
+    private static int num(String o, String k) {
+        String key = "\"" + k + "\":";
+        int i = o.indexOf(key);
+        if (i < 0) return -1;
+        i += key.length();
+        int j = i;
+        while (j < o.length() && (Character.isDigit(o.charAt(j)) || o.charAt(j) == '-')) j++;
+        try { return Integer.parseInt(o.substring(i, j)); } catch (Exception e) { return -1; }
+    }
+
+    private static String q(String s) {
+        if (s == null) return "\"\"";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static String iso(long ms) {
+        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+        f.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return f.format(new Date(ms));
+    }
+
+    private static long parseIso(String s) {
+        if (s == null || s.length() < 19) return System.currentTimeMillis();
+        try {
+            SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+            f.setTimeZone(TimeZone.getTimeZone("UTC"));
+            return f.parse(s.substring(0, 19)).getTime();
+        } catch (Exception e) { return System.currentTimeMillis(); }
+    }
+}

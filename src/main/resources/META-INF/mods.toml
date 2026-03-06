@@ -1,0 +1,45 @@
+modLoader="javafml"
+loaderVersion="[36,)"
+license="All rights reserved"
+
+[[mods]]
+modId="hotkeybind"
+version="1.5.3"
+displayName="Command Macros"
+authors="Gabrielsim, Amiya"
+description="Bind commands and macros to keys. Open UI from Controls settings."
+
+[[dependencies.hotkeybind]]
+    modId="forge"
+    mandatory=true
+    versionRange="[36,)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.hotkeybind]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.16.5,1.17)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[mods]]
+modId="minewatch"
+version="1.3.0"
+displayName="MineWatch"
+authors="Gabrielsim"
+description="HolyWorld mine cooldown HUD with Telegram sync — auto-load on join"
+
+[[dependencies.minewatch]]
+    modId="forge"
+    mandatory=true
+    versionRange="[36,)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.minewatch]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.16.5,1.17)"
+    ordering="NONE"
+    side="CLIENT"
