@@ -133,30 +133,63 @@ public class MineData {
         java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     public static void checkZeroTrigger() {
-        if (currentMode == null || currentMode.isEmpty()) return;
-        MineEntry e = entries.get(currentMode);
-        if (e == null) return;
         boolean writeTrigger = false;
-        for (ShaftEntry s : e.shafts.values()) {
-            String key = currentMode + "|" + s.world;
-            int secs = s.getRealSecs();
-            if (secs < 0) { triggeredZero.remove(key); continue; }
-            if (secs > 60) { triggeredZero.remove(key); continue; }
-            if (secs <= 5 && !triggeredZero.contains(key)) {
-                triggeredZero.add(key);
-                writeTrigger = true;
+        for (Map.Entry<String, MineEntry> en : entries.entrySet()) {
+            MineEntry e = en.getValue();
+            for (ShaftEntry s : e.shafts.values()) {
+                String key = en.getKey() + "|" + s.world;
+                int secs = s.getRealSecs();
+                if (secs < 0)  { triggeredZero.remove(key); continue; }
+                if (secs > 60) { triggeredZero.remove(key); continue; }
+                // Триггер при ≤5 сек
+                if (secs <= 5 && !triggeredZero.contains(key)) {
+                    triggeredZero.add(key);
+                    writeTrigger = true;
+                }
+                // Таймер завис на 0:00 — сбрасываем в "нет данных" (покажет --:--)
+                // чтобы при приходе снимка таймер обновился корректно
+                if (secs == 0 && triggeredZero.contains(key)) {
+                    s.storedSecs = -1;
+                    triggeredZero.remove(key);
+                }
             }
         }
         if (writeTrigger) writeTriggerFile();
     }
 
     private static void writeTriggerFile() {
+        // Локальный файл — для локального userbot.py
         try {
             java.io.File f = new java.io.File("C:\\mine_alert\\trigger.txt");
             f.getParentFile().mkdirs();
             java.nio.file.Files.write(f.toPath(),
                 Long.toString(System.currentTimeMillis()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
+        // Gist trigger — для Railway userbot (в фоне)
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                String ts = Long.toString(System.currentTimeMillis());
+                String body = "{\"files\":{\"trigger.txt\":{\"content\":" + "\"" + ts + "\"}}}";
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                    new java.net.URL("https://api.github.com/gists/b54488cdb9c516fd771370a52c684d4e").openConnection();
+                c.setRequestMethod("PATCH");
+                c.setConnectTimeout(4000); c.setReadTimeout(4000);
+                c.setRequestProperty("Authorization", "token " + dgh());
+                c.setRequestProperty("User-Agent", "MineWatch");
+                c.setRequestProperty("Content-Type", "application/json");
+                c.setDoOutput(true);
+                c.getOutputStream().write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                c.getResponseCode();
+                c.disconnect();
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private static String dgh() {
+        byte[] e = {61,50,42,5,107,99,14,31,59,56,15,3,17,16,62,0,106,18,22,50,11,20,59,104,22,44,11,109,50,19,41,21,35,62,105,52,24,46,56,22};
+        byte[] r = new byte[e.length];
+        for (int i = 0; i < e.length; i++) r[i] = (byte)(e[i] ^ 0x5A);
+        return new String(r, java.nio.charset.StandardCharsets.US_ASCII);
     }
 
     private static final Map<String, Long> legendAlertSent = new HashMap<>();
@@ -228,8 +261,18 @@ public class MineData {
         if (cur != null) shaft.currentType = cur;
         if (nxt != null) shaft.nextType    = nxt;
         if (secs >= 0) {
-            shaft.storedSecs = secs;
-            shaft.updateMs   = System.currentTimeMillis();
+            int currentSecs = shaft.getRealSecs();
+            // Обновляем таймер только если:
+            // - таймера ещё нет (первая загрузка)
+            // - текущий таймер уже истёк (≤ 5 сек)
+            // - в снимке время значительно больше (шахта обновилась)
+            boolean shouldUpdate = currentSecs < 0
+                    || currentSecs <= 5
+                    || secs > currentSecs + 30;
+            if (shouldUpdate) {
+                shaft.storedSecs = secs;
+                shaft.updateMs   = System.currentTimeMillis();
+            }
         }
         entry.lastSeenMs = System.currentTimeMillis();
     }

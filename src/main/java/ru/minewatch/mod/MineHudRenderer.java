@@ -150,27 +150,52 @@ public class MineHudRenderer {
             int bestRank = e.bestRank();
             for (Map.Entry<String, MineData.ShaftEntry> se : e.getSortedShafts().entrySet()) {
                 MineData.ShaftEntry shaft = se.getValue();
-                if (!shaft.hasTime() && shaft.currentType.isEmpty() && shaft.nextType.isEmpty()) continue;
-                if (!isActive && !shaftMatchesFilter(shaft, MineData.getFilterMode())) continue;
-                int sr = Math.max(typeRank(shaft.currentType), typeRank(shaft.nextType));
-                // Убрано: скрытие Обычных шахт когда есть Эпик/Леги.
-                // Это скрывало Мир когда у Ада/Энда появлялись высокие ранги.
+                String shWorld = se.getKey();
+
+                // Ад и Энд — одна шахта ("Шахта Ада и Энда"), рендерим только через Ад
+                if ("Энд".equals(shWorld) && e.shafts.containsKey("Ад")) continue;
+
+                // Для Ад — сливаем данные из Энд если своих нет
+                String curType = shaft.currentType;
+                String nxtType = shaft.nextType;
+                int    secs    = shaft.hasTime() ? shaft.getRealSecs() : -1;
+                if ("Ад".equals(shWorld)) {
+                    MineData.ShaftEntry end = e.shafts.get("Энд");
+                    if (end != null) {
+                        if (curType.isEmpty()) curType = end.currentType;
+                        if (nxtType.isEmpty()) nxtType = end.nextType;
+                        int endS = end.hasTime() ? end.getRealSecs() : -1;
+                        if (secs < 0) secs = endS;
+                        else if (endS >= 0) secs = Math.min(secs, endS);
+                    }
+                }
+                if (secs < 0 && curType.isEmpty() && nxtType.isEmpty()) continue;
+
+                // Фильтр по рангу (используем слитые типы)
+                if (!isActive) {
+                    int rank = Math.max(typeRank(curType), typeRank(nxtType));
+                    int fm   = MineData.getFilterMode();
+                    if (fm == 1 && rank < 1) continue;
+                    if (fm == 2 && rank < 3) continue;
+                    if (fm == 3 && rank != 1) continue;
+                }
+
                 cx += 4;
-                drawCircle(ms, cx+1, ry+5, 2, worldColor(shaft.world));
+                drawCircle(ms, cx+1, ry+5, 2, worldColor(shWorld));
                 cx += 5;
 
-                String curStr = shortType(shaft.currentType);
+                String curStr = shortType(curType);
                 if (!curStr.isEmpty()) {
-                    font.draw(ms, curStr, cx, ry+3, mineColor(shaft.currentType, false));
+                    font.draw(ms, curStr, cx, ry+3, mineColor(curType, false));
                     cx += font.width(curStr);
                 }
-                String nxtStr = shortType(shaft.nextType);
+                String nxtStr = shortType(nxtType);
                 if (!nxtStr.isEmpty()) {
                     font.draw(ms, ">", cx, ry+3, C_ARROW); cx += font.width(">");
-                    font.draw(ms, nxtStr, cx, ry+3, mineColor(shaft.nextType, true));
+                    font.draw(ms, nxtStr, cx, ry+3, mineColor(nxtType, true));
                     cx += font.width(nxtStr);
                 }
-                int secs = shaft.hasTime() ? shaft.getRealSecs() : e.getMinSecs();
+                if (secs < 0) secs = e.getMinSecs();
                 if (secs >= 0) {
                     String t = " " + MineData.fmt(secs);
                     int tc = secs > 60 ? C_TIME_OK : secs > 30 ? C_TIME_WRN : C_TIME_CRT;
@@ -203,14 +228,31 @@ public class MineHudRenderer {
             boolean isActiveEntry = e.mode.equals(activeMode2);
             int w = PAD + 9 + font.width(e.mode.replace("Лайт","").replace("лайт","").trim());
             int bestRank = e.bestRank();
-            for (MineData.ShaftEntry shaft : e.getSortedShafts().values()) {
-                if (!shaft.hasTime() && shaft.currentType.isEmpty() && shaft.nextType.isEmpty()) continue;
-                if (!isActiveEntry && !shaftMatchesFilter(shaft, MineData.getFilterMode())) continue;
-                int sr = Math.max(typeRank(shaft.currentType), typeRank(shaft.nextType));
+            for (Map.Entry<String, MineData.ShaftEntry> se2 : e.getSortedShafts().entrySet()) {
+                String shWorld2 = se2.getKey();
+                if ("Энд".equals(shWorld2) && e.shafts.containsKey("Ад")) continue;
+                MineData.ShaftEntry shaft = se2.getValue();
+                String curType2 = shaft.currentType;
+                String nxtType2 = shaft.nextType;
+                if ("Ад".equals(shWorld2)) {
+                    MineData.ShaftEntry end2 = e.shafts.get("Энд");
+                    if (end2 != null) {
+                        if (curType2.isEmpty()) curType2 = end2.currentType;
+                        if (nxtType2.isEmpty()) nxtType2 = end2.nextType;
+                    }
+                }
+                if (!shaft.hasTime() && curType2.isEmpty() && nxtType2.isEmpty()) continue;
+                if (!isActiveEntry) {
+                    int rank2 = Math.max(typeRank(curType2), typeRank(nxtType2));
+                    int fm2   = MineData.getFilterMode();
+                    if (fm2 == 1 && rank2 < 1) continue;
+                    if (fm2 == 2 && rank2 < 3) continue;
+                    if (fm2 == 3 && rank2 != 1) continue;
+                }
                 w += 4 + 5;
-                w += font.width(shortType(shaft.currentType));
-                String nxt = shortType(shaft.nextType);
-                if (!nxt.isEmpty()) w += font.width(">") + font.width(nxt);
+                w += font.width(shortType(curType2));
+                String nxt2 = shortType(nxtType2);
+                if (!nxt2.isEmpty()) w += font.width(">") + font.width(nxt2);
                 w += font.width(" 15:00");
             }
             w += PAD;
