@@ -8,54 +8,34 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.*;
 
-/**
- * Polls Telegram for mine-state messages from @liteeventbot.
- *
- * Setup:
- *   1. Create a bot via @BotFather – get a token.
- *   2. Create a Telegram group, add @liteeventbot + your new bot as members.
- *   3. Get the group chat-id: send any message to the group, then open
- *      https://api.telegram.org/bot<TOKEN>/getUpdates and look for "chat":{"id":...}
- *   4. Create C:\mine_alert\tg_config.txt with:
- *        token=<your_bot_token>
- *        chat=<group_chat_id>     (negative number, e.g. -1001234567890)
- *        trigger=true             (optional – sends "Снимок шахт" every N minutes)
- *        interval=5               (optional – minutes between triggers, default 5)
- */
 public class TelegramSync {
 
     private static final String TG_API = "https://api.telegram.org/bot";
 
-    // Config (loaded from tg_config.txt)
     private static String  botToken     = "";
     private static String  chatId       = "";
     private static boolean triggerOn    = false;
     private static int     intervalMins = 5;
 
-    // Gist URL для чтения снимков из облачного userbot (Railway)
     private static final String GIST_URL =
         "https://gist.githubusercontent.com/Morikemuri/b54488cdb9c516fd771370a52c684d4e/raw/snapshot.txt";
 
-    private static long lastUpdateId    = 0;
-    private static long lastTriggerMs   = 0;
-    private static long lastSnapshotMs  = 0; // время последнего чтения snapshot.txt
-    private static int  lastGistHash    = 0; // хэш последнего содержимого Gist
+    private static long lastUpdateId   = 0;
+    private static long lastTriggerMs  = 0;
+    private static long lastSnapshotMs = 0;
+    private static int  lastGistHash   = 0;
 
     private static ScheduledExecutorService exec;
 
-    // "Эпическая Шахта Верхнего мира:" / "Ад - Легендарная Шахта Ада и Энда:"
     private static final Pattern PAT_HEADER = Pattern.compile(
         "^(Ад|Энд)?\\s*[-\u2013\u2014]?\\s*(Легендарн\\S+|Эпическ\\S+|Мифическ\\S+|Обычн\\S+)\\s+Шахт\\S*.*$",
         Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
-    // "КланЛайт #55 169 сек." (repeated, comma-separated)
     private static final Pattern PAT_ENTRY = Pattern.compile(
         "([А-Яа-яёЁA-Za-z]+\\s*#\\d+)\\s+(\\d+)\\s*сек",
         Pattern.UNICODE_CASE
     );
-
-    // ─── Config ──────────────────────────────────────────────────────────────
 
     public static boolean isConfigured() {
         return !botToken.isEmpty() && !chatId.isEmpty();
@@ -78,8 +58,6 @@ public class TelegramSync {
         } catch (Exception ignored) {}
     }
 
-    // ─── Lifecycle ───────────────────────────────────────────────────────────
-
     public static void start() {
         loadConfig();
         exec = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -87,10 +65,8 @@ public class TelegramSync {
             t.setDaemon(true);
             return t;
         });
-        // Читаем snapshot.txt всегда — даже без Telegram бота
         exec.scheduleAtFixedRate(TelegramSync::tick, 5, 10, TimeUnit.SECONDS);
         if (isConfigured()) {
-            // При старте — сразу запросить снимок шахт через 5 секунд
             exec.schedule(() -> {
                 try { sendTrigger(); lastTriggerMs = System.currentTimeMillis(); } catch (Exception ignored) {}
                 try { Thread.sleep(4000); } catch (Exception ignored) {}
@@ -98,15 +74,13 @@ public class TelegramSync {
             }, 5, TimeUnit.SECONDS);
             MineWatchMod.LOGGER.info("TelegramSync started (chat={})", chatId);
         } else {
-            MineWatchMod.LOGGER.info("TelegramSync: нет конфига, только snapshot.txt");
+            MineWatchMod.LOGGER.info("TelegramSync: no config, Gist-only mode");
         }
     }
 
     public static void stop() {
         if (exec != null) exec.shutdownNow();
     }
-
-    // ─── Main loop ───────────────────────────────────────────────────────────
 
     private static void tick() {
         try { checkSnapshotFile(); } catch (Exception ignored) {}
@@ -121,8 +95,8 @@ public class TelegramSync {
         }
     }
 
-    /** Fetch new updates via getUpdates long-polling (offset = lastUpdateId+1). */
     private static void poll() throws Exception {
+        if (!isConfigured()) return;
         String url = TG_API + botToken
                 + "/getUpdates?offset=" + (lastUpdateId + 1)
                 + "&limit=100&timeout=1";
@@ -138,7 +112,6 @@ public class TelegramSync {
             String msg = extractObject(update, mi + 10);
             if (msg.isEmpty()) continue;
 
-            // Optional: filter by chat id
             if (!chatId.isEmpty()) {
                 int ci = msg.indexOf("\"chat\":{");
                 if (ci >= 0) {
@@ -153,10 +126,6 @@ public class TelegramSync {
         }
     }
 
-    /**
-     * Немедленный триггер "Снимок шахт" — вызывается при заходе на сервер.
-     * Кулдаун 30 секунд чтобы не спамить.
-     */
     public static void triggerNow() {
         if (!isConfigured() || exec == null || exec.isShutdown()) return;
         long now = System.currentTimeMillis();
@@ -168,29 +137,24 @@ public class TelegramSync {
         });
     }
 
-    /** Send "Снимок шахт" to the group to trigger @liteeventbot. */
     private static void sendTrigger() throws Exception {
         String url  = TG_API + botToken + "/sendMessage";
         String body = "{\"chat_id\":" + chatId + ",\"text\":\"Снимок шахт\"}";
         httpPost(url, body);
     }
 
-    // ─── Локальный файл снимка (от userbot.py) ───────────────────────────────
-
     private static void checkSnapshotFile() throws Exception {
         java.io.File f = new java.io.File("C:\\mine_alert\\snapshot.txt");
         if (!f.exists()) return;
         long modified = f.lastModified();
-        if (modified <= lastSnapshotMs) return; // уже читали этот снимок
+        if (modified <= lastSnapshotMs) return;
         lastSnapshotMs = modified;
-        String text = new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+        String text = new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
         if (!text.isEmpty()) {
             parseMineMessage(text);
-            MineWatchMod.LOGGER.info("TelegramSync: snapshot.txt загружен ({} байт)", text.length());
+            MineWatchMod.LOGGER.info("TelegramSync: snapshot.txt loaded ({} bytes)", text.length());
         }
     }
-
-    // ─── Gist snapshot (облачный userbot на Railway) ─────────────────────────
 
     private static void checkGistSnapshot() throws Exception {
         String text = httpGet(GIST_URL + "?nocache=" + System.currentTimeMillis());
@@ -199,21 +163,9 @@ public class TelegramSync {
         if (hash == lastGistHash) return;
         lastGistHash = hash;
         parseMineMessage(text);
-        MineWatchMod.LOGGER.info("TelegramSync: Gist-снимок загружен ({} байт)", text.length());
+        MineWatchMod.LOGGER.info("TelegramSync: Gist snapshot loaded ({} bytes)", text.length());
     }
 
-    // ─── Message parser ──────────────────────────────────────────────────────
-
-    /**
-     * Parses a mine-snapshot message and feeds data into MineData.
-     *
-     * Expected format (one or more blocks):
-     *   Эпическая Шахта Верхнего мира:
-     *   КланЛайт #55 169 сек., КланЛайт #61 388 сек., ...
-     *
-     *   Ад - Легендарная Шахта Ада и Энда:
-     *   ДуоЛайт #18 389 сек., ТриоЛайт #46 391 сек., ...
-     */
     static void parseMineMessage(String text) {
         String[] lines = text.split("\n");
         String world = null;
@@ -221,12 +173,7 @@ public class TelegramSync {
 
         for (String raw : lines) {
             String line = raw.trim();
-            if (line.isEmpty()) {
-                // blank line resets context
-                world = null;
-                type  = null;
-                continue;
-            }
+            if (line.isEmpty()) { world = null; type = null; continue; }
 
             Matcher hm = PAT_HEADER.matcher(line);
             if (hm.matches()) {
@@ -240,7 +187,6 @@ public class TelegramSync {
                 while (em.find()) {
                     String party = em.group(1).trim();
                     int    secs  = Integer.parseInt(em.group(2));
-                    // null for nextType – we don't know it from the snapshot
                     MineData.setRemoteData(party, world, type, null, secs);
                 }
             }
@@ -264,8 +210,6 @@ public class TelegramSync {
         return "Обычная";
     }
 
-    // ─── HTTP ────────────────────────────────────────────────────────────────
-
     private static String httpGet(String rawUrl) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(rawUrl).openConnection();
         c.setRequestMethod("GET");
@@ -286,32 +230,26 @@ public class TelegramSync {
         c.setReadTimeout(5000);
         c.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
         c.setDoOutput(true);
-        byte[] b = body.getBytes(StandardCharsets.UTF_8);
-        c.getOutputStream().write(b);
+        c.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
         c.getResponseCode();
         c.disconnect();
     }
 
     private static String readAll(InputStream is) throws Exception {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        byte[] tmp = new byte[4096];
-        int n;
+        byte[] tmp = new byte[4096]; int n;
         while ((n = is.read(tmp)) != -1) buf.write(tmp, 0, n);
         return buf.toString("UTF-8");
     }
 
-    // ─── Minimal JSON (no external deps) ────────────────────────────────────
-
-    /** Extract all top-level objects from the "result":[...] array. */
     private static List<String> extractResultObjects(String json) {
         List<String> res = new ArrayList<>();
         int ri = json.indexOf("\"result\":[");
         if (ri < 0) return res;
-        int i = ri + 9; // points to '['
+        int i = ri + 9;
         while (i < json.length() && json.charAt(i) != '[') i++;
         if (i >= json.length()) return res;
-        i++; // skip '['
-
+        i++;
         int depth = 0, start = -1;
         while (i < json.length()) {
             char c = json.charAt(i);
@@ -323,7 +261,6 @@ public class TelegramSync {
         return res;
     }
 
-    /** Extract the JSON object starting at (or after) fromIdx. */
     private static String extractObject(String json, int fromIdx) {
         int depth = 0, start = -1;
         for (int i = fromIdx; i < json.length(); i++) {
@@ -338,7 +275,6 @@ public class TelegramSync {
         try { return Long.parseLong(jsonRaw(json, key)); } catch (Exception e) { return 0L; }
     }
 
-    /** Extract a JSON string value (handles \n \r \t \\ \" escapes). */
     private static String jsonStr(String json, String key) {
         String k = "\"" + key + "\":\"";
         int i = json.indexOf(k);
@@ -368,14 +304,12 @@ public class TelegramSync {
         return sb.toString();
     }
 
-    /** Extract a raw (unquoted) JSON value: number, boolean, null. */
     private static String jsonRaw(String json, String key) {
         String k = "\"" + key + "\":";
         int i = json.indexOf(k);
         if (i < 0) return "";
         i += k.length();
         while (i < json.length() && json.charAt(i) == ' ') i++;
-        // Skip string values
         if (i < json.length() && json.charAt(i) == '"') return "";
         int j = i;
         while (j < json.length()) {
