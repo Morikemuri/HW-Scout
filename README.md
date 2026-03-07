@@ -25,11 +25,8 @@ Tracks mine reset timers across multiple servers and displays them in a HUD over
 
 | Key | Action |
 |-----|--------|
-| `K` | Toggle HUD visibility |
-| `L` | Pause / resume timers |
-| `J` | Cycle max entries (5 / 10 / 15) |
-| `H` | Cycle filter (all / epic+ / legendary / epic) |
-| `G` | Toggle global mode (all servers / current only) |
+| `End` | Toggle HUD visibility |
+| `Right Alt` | moves the HUD |
 
 ## HUD buttons
 
