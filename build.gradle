@@ -1,52 +1,38 @@
-buildscript {
-    repositories {
-        maven { url = 'https://maven.minecraftforge.net' }
-        mavenCentral()
-    }
-    dependencies {
-        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '4.1.+', changing: true
-    }
+plugins {
+    id 'fabric-loom' version '1.0-SNAPSHOT'
+    id 'java'
 }
 
-apply plugin: 'net.minecraftforge.gradle'
-apply plugin: 'java'
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(8)
-compileJava.options.encoding = 'UTF-8'
-
-version = '1.3.0'
-group = 'ru.minewatch.mod'
 archivesBaseName = 'minewatch'
-
-minecraft {
-    mappings channel: 'official', version: '1.16.5'
-    runs {
-        client {
-            workingDirectory project.file('run')
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                minewatch { source sourceSets.main }
-            }
-        }
-    }
-}
+version = '1.3.0'
+group = 'ru.minewatch'
 
 repositories {
-    maven { url = 'https://maven.minecraftforge.net' }
+    maven { url = 'https://maven.fabricmc.net/' }
+    mavenCentral()
 }
 
 dependencies {
-    minecraft 'net.minecraftforge:forge:1.16.5-36.2.39'
+    minecraft 'com.mojang:minecraft:1.16.5'
+    mappings 'net.fabricmc:yarn:1.16.5+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.13.3'
 }
 
-jar {
-    archiveName = "minewatch-${version}-forge-1.16.5.jar"
-    manifest {
-        attributes([
-            "Specification-Title"   : "minewatch",
-            "Specification-Version" : "1",
-            "Implementation-Title"  : project.name,
-            "Implementation-Version": project.version,
-        ])
+remapJar {
+    archiveFileName = "minewatch-${version}-fabric-1.16.5.jar"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
     }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 8
 }
