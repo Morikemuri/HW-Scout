@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "ru.minewatch.mod.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "minewatch-refmap.json",
+  "client": [
+    "InGameHudMixin",
+    "MinecraftClientMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
