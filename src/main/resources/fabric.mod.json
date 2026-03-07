@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "minewatch",
+  "version": "${version}",
+  "name": "MineWatch",
+  "description": "HolyWorld mine tracker",
+  "authors": ["Morikemuri"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "ru.minewatch.mod.MineWatchMod"
+    ]
+  },
+  "mixins": [
+    "minewatch.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.12.0",
+    "minecraft": "~1.16.5",
+    "java": ">=8"
+  }
+}
