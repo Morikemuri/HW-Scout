@@ -8,19 +8,24 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
+// ================================================================
+// [MINEWATCH::SYNC] :: remote data sync daemon
+// push local state to Supabase, pull peer nodes every 3s
+// heartbeat ping every 60s
+// ================================================================
 public class ApiSync {
 
-    // XOR-encoded to avoid plaintext in bytecode (key ^ 0x5A)
+    // -- ENDPOINT CONFIG --
+    private static final String BASE    = "https://csmdyxvduilvjxvcyzwj.supabase.co/rest/v1";
     private static final byte[] K = {41,56,5,42,47,56,54,51,41,50,59,56,54,63,5,106,47,111,105,109,55,19,55,32,15,56,40,47,19,50,110,119,11,44,40,8,27,5,35,49,30,31,13,56,8,32};
     private static String dk() { byte[] b=K.clone(); for(int i=0;i<b.length;i++) b[i]^=0x5A; return new String(b,java.nio.charset.StandardCharsets.UTF_8); }
-
-    private static final String BASE    = "https://csmdyxvduilvjxvcyzwj.supabase.co/rest/v1";
     static final         String VERSION = "1.0.0";
 
-    static  String uuid;
-    private static ScheduledExecutorService exec;
+    static  String uuid;                           // unique node identity
+    private static ScheduledExecutorService exec;  // daemon thread pool
     private static long lastPing = 0;
 
+    // BOOT: start single-thread daemon scheduler
     public static void start() {
         uuid = loadUuid();
         exec = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -28,20 +33,21 @@ public class ApiSync {
             t.setDaemon(true);
             return t;
         });
-        exec.scheduleAtFixedRate(ApiSync::tick, 1, 3, TimeUnit.SECONDS);
+        exec.scheduleAtFixedRate(ApiSync::tick, 5, 3, TimeUnit.SECONDS);
     }
 
+    // STOP: shutdown executor (called from JVM shutdown hook)
     public static void stop() {
         if (exec != null) exec.shutdownNow();
     }
 
-    /** Немедленный pull данных из облака (при заходе на сервер). */
+    // PULL_NOW: immediate pull on server join
     public static void pullNow() {
-        if (exec != null && !exec.isShutdown()) {
+        if (exec != null && !exec.isShutdown())
             exec.submit(() -> { try { pull(); } catch (Exception ignored) {} });
-        }
     }
 
+    // TICK: main sync cycle - push, pull, ping
     private static void tick() {
         try { push(); } catch (Exception ignored) {}
         try { pull(); } catch (Exception ignored) {}
@@ -50,6 +56,7 @@ public class ApiSync {
         }
     }
 
+    // PUSH: transmit local shaft state to backend registry
     private static void push() throws Exception {
         String mode = MineData.getAnarchyMode();
         if (mode == null || mode.isEmpty()) return;
@@ -67,6 +74,7 @@ public class ApiSync {
         }
     }
 
+    // PULL: fetch remote peer nodes from backend (last 120s window)
     private static void pull() throws Exception {
         String cutoff = iso(System.currentTimeMillis() - 120_000);
         String resp   = get("/mines?select=*&updated_at=gte." + URLEncoder.encode(cutoff, "UTF-8"));
@@ -83,19 +91,22 @@ public class ApiSync {
 
             if (server.isEmpty() || server.equals(myMode)) continue;
 
+            // ADJUST: compensate server-side timestamp drift
             long updMs  = parseIso(updAt);
             int  actual = secs < 0 ? -1 : (int) Math.max(0, secs - (System.currentTimeMillis() - updMs) / 1000L);
             MineData.setRemoteData(server, world, cur, nxt, actual);
         }
     }
 
+    // PING: heartbeat beacon to node registry
     private static void ping() throws Exception {
         String body = "{\"uuid\":" + q(uuid) + ",\"mod_version\":" + q(VERSION) + "}";
         post("/pings", body, "resolution=merge-duplicates");
     }
 
-    // --- http ---
+    // ---- HTTP LAYER ----
 
+    // POST: send JSON payload to endpoint
     private static void post(String path, String body, String prefer) throws Exception {
         HttpURLConnection c = conn("POST", BASE + path);
         if (prefer != null) c.setRequestProperty("Prefer", prefer);
@@ -107,6 +118,7 @@ public class ApiSync {
         c.disconnect();
     }
 
+    // GET: fetch raw JSON from endpoint
     private static String get(String path) throws Exception {
         HttpURLConnection c = conn("GET", BASE + path);
         int code = c.getResponseCode();
@@ -119,6 +131,7 @@ public class ApiSync {
         return buf.toString("UTF-8");
     }
 
+    // CONN: build authenticated HTTP connection
     private static HttpURLConnection conn(String method, String url) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod(method);
@@ -131,8 +144,9 @@ public class ApiSync {
         return c;
     }
 
-    // --- uuid ---
+    // ---- UUID LAYER ----
 
+    // LOAD: read or generate persistent node UUID from disk
     private static String loadUuid() {
         File f = new File("C:\\mine_alert\\mwid.txt");
         try {
@@ -145,12 +159,13 @@ public class ApiSync {
             Files.write(f.toPath(), id.getBytes(StandardCharsets.UTF_8));
             return id;
         } catch (Exception e) {
-            return UUID.randomUUID().toString();
+            return UUID.randomUUID().toString(); // fallback: ephemeral id
         }
     }
 
-    // --- json ---
+    // ---- JSON PARSER (minimal, no deps) ----
 
+    // PARSE: split top-level JSON array into object strings
     private static List<String> parseArray(String arr) {
         List<String> res = new ArrayList<>();
         int depth = 0, start = -1;
@@ -162,6 +177,7 @@ public class ApiSync {
         return res;
     }
 
+    // EXTRACT: string value from JSON object by key
     private static String str(String o, String k) {
         String key = "\"" + k + "\":\"";
         int i = o.indexOf(key);
@@ -175,6 +191,7 @@ public class ApiSync {
         return o.substring(i, j);
     }
 
+    // EXTRACT: numeric value from JSON object by key
     private static int num(String o, String k) {
         String key = "\"" + k + "\":";
         int i = o.indexOf(key);
@@ -185,17 +202,20 @@ public class ApiSync {
         try { return Integer.parseInt(o.substring(i, j)); } catch (Exception e) { return -1; }
     }
 
+    // UTIL: JSON-quote a string value
     private static String q(String s) {
         if (s == null) return "\"\"";
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
+    // UTIL: format epoch ms as ISO-8601 UTC string
     private static String iso(long ms) {
         SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
         f.setTimeZone(TimeZone.getTimeZone("UTC"));
         return f.format(new Date(ms));
     }
 
+    // UTIL: parse ISO-8601 timestamp to epoch ms
     private static long parseIso(String s) {
         if (s == null || s.length() < 19) return System.currentTimeMillis();
         try {
