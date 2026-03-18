@@ -258,7 +258,8 @@ public class TelegramSync {
                         long elapsed = (System.currentTimeMillis() - snapshotMs) / 1000L;
                         secs = (int) Math.max(0, secsRaw - elapsed);
                     }
-                    MineData.setRemoteData(party, world, type, null, secs);
+                    // type из заголовка = СЛЕДУЮЩАЯ шахта (таймер считает до неё)
+                    MineData.setRemoteData(party, world, null, type, secs);
                 }
             }
         }

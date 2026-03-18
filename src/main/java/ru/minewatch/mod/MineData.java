@@ -258,8 +258,9 @@ public class MineData {
         if (server.equals(currentMode)) return;
         MineEntry entry = getOrCreate(server);
         ShaftEntry shaft = entry.getOrCreateShaft(world != null && !world.isEmpty() ? world : "Мир");
-        if (cur != null) shaft.currentType = cur;
-        if (nxt != null) shaft.nextType    = nxt;
+        // Не перезаписываем типы живыми данными игрока (remoteOnly=false)
+        if (cur != null && (entry.remoteOnly || shaft.currentType.isEmpty())) shaft.currentType = cur;
+        if (nxt != null && (entry.remoteOnly || shaft.nextType.isEmpty()))    shaft.nextType    = nxt;
         if (secs >= 0) {
             int currentSecs = shaft.getRealSecs();
             boolean shouldUpdate;
