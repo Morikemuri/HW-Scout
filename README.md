@@ -13,23 +13,13 @@ Tracks mine reset timers across multiple servers and displays them in a HUD over
 - **Delete mode** - per-row ✕ buttons to remove individual server entries
 - **Filter modes** - show all / epic+ / legendary only / epic only
 - **Legend alerts** - on-screen flash when a legendary mine on another server is about to reset
-- **Draggable HUD** - hold and drag to reposition
+- **Draggable HUD** - hold `Right Alt` and drag with `LBM` to reposition
 
 ## Installation
 
 1. Install [Forge 1.16.5](https://files.minecraftforge.net/)
 2. Drop `minewatch-1.3.1-forge-1.16.5.jar` into your `mods/` folder
 3. Launch the game
-
-## Keybinds
-
-| Key | Action |
-|-----|--------|
-| `K` | Toggle HUD visibility |
-| `L` | Pause / resume timers |
-| `J` | Cycle max entries (5 / 10 / 15) |
-| `H` | Cycle filter (all / epic+ / legendary / epic) |
-| `G` | Toggle global mode (all servers / current only) |
 
 ## HUD buttons
 
@@ -39,6 +29,7 @@ Tracks mine reset timers across multiple servers and displays them in a HUD over
 | `∞` | Toggle global mode |
 | `F` | Cycle filter |
 | `#` | Cycle max entries |
+| `TG` | Toggle global mode |
 | `✕` | Enter delete mode (per-row delete buttons appear) |
 
 ## Architecture

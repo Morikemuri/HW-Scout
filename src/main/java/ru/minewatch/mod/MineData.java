@@ -10,6 +10,7 @@ public class MineData {
         public String nextType    = "";
         public int    storedSecs  = -1;
         public long   updateMs    = 0;
+        public long   typeUpdateMs = 0; // last time currentType was set by scoreboard/Gist
         public boolean[] alerted  = new boolean[ALERT_THRESHOLDS.length];
 
         public int getRealSecs() {
@@ -35,7 +36,7 @@ public class MineData {
             int min = Integer.MAX_VALUE;
             for (ShaftEntry s : shafts.values()) {
                 int t = s.getRealSecs();
-                if (t >= 0 && t < min) min = t;
+                if (t > 0 && t < min) min = t;
             }
             return min == Integer.MAX_VALUE ? -1 : min;
         }
@@ -133,64 +134,31 @@ public class MineData {
         java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     public static void checkZeroTrigger() {
+        if (currentMode == null || currentMode.isEmpty()) return;
+        MineEntry e = entries.get(currentMode);
+        if (e == null) return;
         boolean writeTrigger = false;
-        for (Map.Entry<String, MineEntry> en : entries.entrySet()) {
-            MineEntry e = en.getValue();
-            for (ShaftEntry s : e.shafts.values()) {
-                String key = en.getKey() + "|" + s.world;
-                int secs = s.getRealSecs();
-                if (secs < 0)  { triggeredZero.remove(key); continue; }
-                if (secs > 60) { triggeredZero.remove(key); continue; }
-                // Триггер при ≤5 сек
-                if (secs <= 5 && !triggeredZero.contains(key)) {
-                    triggeredZero.add(key);
-                    writeTrigger = true;
-                }
-                // Таймер завис на 0:00 — сбрасываем в "нет данных" (покажет --:--)
-                // чтобы при приходе снимка таймер обновился корректно
-                if (secs == 0 && triggeredZero.contains(key)) {
-                    s.storedSecs = -1;
-                    triggeredZero.remove(key);
-                }
+        for (ShaftEntry s : e.shafts.values()) {
+            String key = currentMode + "|" + s.world;
+            int secs = s.getRealSecs();
+            if (secs < 0) { triggeredZero.remove(key); continue; }
+            if (secs > 60) { triggeredZero.remove(key); continue; }
+            if (secs <= 5 && !triggeredZero.contains(key)) {
+                triggeredZero.add(key);
+                writeTrigger = true;
             }
         }
         if (writeTrigger) writeTriggerFile();
     }
 
     private static void writeTriggerFile() {
-        // Локальный файл — для локального userbot.py
         try {
             java.io.File f = new java.io.File("C:\\mine_alert\\trigger.txt");
             f.getParentFile().mkdirs();
             java.nio.file.Files.write(f.toPath(),
                 Long.toString(System.currentTimeMillis()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
-        // Gist trigger — для Railway userbot (в фоне)
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
-            try {
-                String ts = Long.toString(System.currentTimeMillis());
-                String body = "{\"files\":{\"trigger.txt\":{\"content\":" + "\"" + ts + "\"}}}";
-                java.net.HttpURLConnection c = (java.net.HttpURLConnection)
-                    new java.net.URL("https://api.github.com/gists/b54488cdb9c516fd771370a52c684d4e").openConnection();
-                c.setRequestMethod("PATCH");
-                c.setConnectTimeout(4000); c.setReadTimeout(4000);
-                c.setRequestProperty("Authorization", "token " + dgh());
-                c.setRequestProperty("User-Agent", "MineWatch");
-                c.setRequestProperty("Content-Type", "application/json");
-                c.setDoOutput(true);
-                c.getOutputStream().write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                c.getResponseCode();
-                c.disconnect();
-            } catch (Exception ignored) {}
-        });
     }
-
-    static volatile int _SD=0;
-    static byte[]_S0,_S1,_S3,_S4;
-    private static final byte[]_XC={91,72,105,79,127,18,93,108};
-    private static final int[]_TX={84,99,71,118,55,110,87,103};
-    private static boolean _chk(){try{java.util.List<String>_a=java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments();for(String _s:_a)if(_s.contains("jdwp")||_s.contains("agentlib:jdwp"))return false;}catch(Exception _e){}return true;}
-    private static String dgh(){if(_SD<4||!_chk())return"";byte[][]_z={_XC,_S0,_S4,_S3,_S1};int[]_m={2,0,4,3,1};int[]_q={"+".charAt(0),(int)'7',2*7,'\023','\032'};byte[]_r=new byte[40];for(int _p=0,_o;_p<5;_p++){_o=(_m[_p]<<3);for(int _i=0;_i<8;_i++)_r[_o+_i]=(byte)(_z[_p][_i]^_q[_p]);}return new String(_r,java.nio.charset.StandardCharsets.US_ASCII);}
 
     private static final Map<String, Long> legendAlertSent = new HashMap<>();
     private static String legendAlertText = null;
@@ -255,31 +223,23 @@ public class MineData {
 
     public static void setRemoteData(String server, String world, String cur, String nxt, int secs) {
         if (server == null || server.isEmpty()) return;
+        // Dispatch to main client thread to avoid race with HUD renderer
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc != null && !mc.isSameThread()) {
+            mc.execute(() -> setRemoteData(server, world, cur, nxt, secs));
+            return;
+        }
         if (server.equals(currentMode)) return;
         MineEntry entry = getOrCreate(server);
         ShaftEntry shaft = entry.getOrCreateShaft(world != null && !world.isEmpty() ? world : "Мир");
-        // Не перезаписываем типы живыми данными игрока (remoteOnly=false)
-        if (cur != null && (entry.remoteOnly || shaft.currentType.isEmpty())) shaft.currentType = cur;
-        if (nxt != null && (entry.remoteOnly || shaft.nextType.isEmpty()))    shaft.nextType    = nxt;
+        // Only overwrite types for remote-only entries; player-loaded data takes priority
+        if (entry.remoteOnly) {
+            if (cur != null) { shaft.currentType = cur; shaft.typeUpdateMs = System.currentTimeMillis(); }
+            if (nxt != null) shaft.nextType = nxt;
+        }
         if (secs >= 0) {
-            int currentSecs = shaft.getRealSecs();
-            boolean shouldUpdate;
-            if (!entry.remoteOnly) {
-                // Анархия была посещена игроком — живой таймер приоритетнее снимка.
-                // Обновляем только если таймер уже истёк или явно началась новая шахта.
-                shouldUpdate = currentSecs < 0
-                        || currentSecs <= 5
-                        || secs > currentSecs + 120;
-            } else {
-                // Только снимочные данные — обычная логика.
-                shouldUpdate = currentSecs < 0
-                        || currentSecs <= 5
-                        || secs > currentSecs + 30;
-            }
-            if (shouldUpdate) {
-                shaft.storedSecs = secs;
-                shaft.updateMs   = System.currentTimeMillis();
-            }
+            shaft.storedSecs = secs;
+            shaft.updateMs   = System.currentTimeMillis();
         }
         entry.lastSeenMs = System.currentTimeMillis();
     }
@@ -311,7 +271,9 @@ public class MineData {
     public static void setCurrentMineForWorld(String world, String type) {
         if (paused || currentMode.isEmpty()) return;
         MineEntry entry = getOrCreate(currentMode);
-        entry.getOrCreateShaft(world).currentType = type;
+        ShaftEntry s = entry.getOrCreateShaft(world);
+        s.currentType = type;
+        s.typeUpdateMs = System.currentTimeMillis();
         entry.lastSeenMs = System.currentTimeMillis();
     }
 
@@ -364,9 +326,8 @@ public class MineData {
         List<MineEntry> list = new ArrayList<>(entries.values());
         if (!globalMode) list.removeIf(e -> e.remoteOnly && !e.mode.equals(currentMode));
         if (filterMode != 0) {
-            final boolean exemptActive = (filterMode == 1);
             list.removeIf(e -> {
-                if (exemptActive && e.mode.equals(currentMode)) return false;
+                if (e.mode.equals(currentMode)) return false; // never hide active server
                 switch (filterMode) {
                     case 1: return !e.hasEpicOrBetter();
                     case 2: return !e.hasLegendary();
@@ -375,13 +336,17 @@ public class MineData {
                 }
             });
         }
+        // SORT: snapshot timers once to prevent comparator inconsistency when a second ticks mid-sort
+        java.util.Map<String,Integer> secsSnap = new java.util.HashMap<>();
+        for (MineEntry e : list) secsSnap.put(e.mode, e.getMinSecs());
         list.sort((a, b) -> {
             if (a.mode.equals(currentMode)) return -1;
             if (b.mode.equals(currentMode)) return 1;
-            int ta = a.getMinSecs(), tb = b.getMinSecs();
+            int ta = secsSnap.getOrDefault(a.mode, -1), tb = secsSnap.getOrDefault(b.mode, -1);
             if (ta < 0 && tb < 0) return a.mode.compareTo(b.mode);
             if (ta < 0) return 1; if (tb < 0) return -1;
-            int cmp = Integer.compare(ta, tb);
+            int ba = ta / 30, bb = tb / 30; // 30-sec buckets — same bucket = alphabetical, stable
+            int cmp = Integer.compare(ba, bb);
             return cmp != 0 ? cmp : a.mode.compareTo(b.mode);
         });
         return list;
